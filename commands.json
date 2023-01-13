@@ -1,0 +1,22 @@
+{
+    "InjectionMouldingMachine1_on": {
+        "object_id": "urn:ngsiv2:i40Asset:InjectionMouldingMachine1",
+        "type": "turn_on"
+    },
+    "InjectionMouldingMachine1_off": {
+        "object_id": "urn:ngsiv2:i40Asset:InjectionMouldingMachine1",
+        "type": "turn_off"
+    },
+    "InjectionMouldingMachine1_good_parts_completed": {
+        "object_id": "urn:ngsiv2:i40Asset:InjectionMouldingMachine1",
+        "type": "handle_good_cycle"
+    },
+    "InjectionMouldingMachine1_reject_parts_completed": {
+        "object_id": "urn:ngsiv2:i40Asset:InjectionMouldingMachine1",
+        "type": "handle_reject_cycle"
+    },
+    "InjectionMouldingMachine1_new_job": {
+        "object_id": "urn:ngsiv2:i40Asset:InjectionMouldingMachine1",
+        "type": "new_job"
+    }
+}
