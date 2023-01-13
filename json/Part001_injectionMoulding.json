@@ -1,0 +1,17 @@
+{
+    "id": "urn:ngsiv2:i40Recipe:Operation_Part001_injectionMoulding",
+    "type": "i40Recipe",
+    "i40RecipeType": {"type": "Text", "value": "Operation"},
+    "refSequenceOfOperations": {
+        "type": "Relationship",
+        "value": "urn:ngsiv2:i40Recipe:SequenceOfOperations_Part001"
+    },
+    "cycleTime": {
+        "type": "Number",
+        "value": 40
+    },
+    "partsPerCycle": {
+        "type": "Number",
+        "value": 4
+    }
+}
