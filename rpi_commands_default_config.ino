@@ -46,7 +46,7 @@ const byte rejectPartPin = 4;
 // structs
 struct inputSignal {
   byte pin;
-  bool isCommandSent = 0;
+  bool isSendingCommandNecessary = true;
   bool reading = LOW;
   bool lastState = LOW;
   unsigned long lastChangeTimeMilliseconds = millis();
@@ -88,7 +88,7 @@ bool isStateChanged(inputSignal *signal) {
 void update(inputSignal *signal) {
   (*signal).lastState = (*signal).reading;
   (*signal).lastChangeTimeMilliseconds = millis();
-  (*signal).isCommandSent = 0;
+  (*signal).isSendingCommandNecessary = true;
 }
 
 void sendCommandWithoutArgument(char *command_id) {
@@ -106,9 +106,19 @@ bool isResendCommandDue(inputSignal *signal) {
   }
 }
 
-void handleResendCommand(inputSignal *signal) {
+void indicateSendingCommandNecessaryIfNeeded(inputSignal *signal) {
   if (isResendCommandDue(signal)) {
-    (*signal).isCommandSent = 0;
+    (*signal).isSendingCommandNecessary = true;
+  }
+}
+
+void resendAvailabilityCommand(){
+  if (availabilitySignal.lastState == LOW) {
+    // Injection moulder automatic
+    sendCommandWithoutArgument("InjectionMouldingMachine1_on");
+  } else {  // HIGH
+    // Injection moulder not automatic
+    sendCommandWithoutArgument("InjectionMouldingMachine1_off");
   }
 }
 
@@ -138,17 +148,11 @@ void handleAvailability() {
     update(&availabilitySignal);
   } else {
     // availability signal unchanged since last loop
-    handleResendCommand(&availabilitySignal);
+    indicateSendingCommandNecessaryIfNeeded(&availabilitySignal);
     if (isStableLongerThan(&availabilitySignal, DEBOUNCE_DELAY_MILLISECONDS)
-        && !availabilitySignal.isCommandSent) {
-      if (availabilitySignal.lastState == LOW) {
-        // Injection moulder automatic
-        sendCommandWithoutArgument("InjectionMouldingMachine1_on");
-      } else {  // HIGH
-        // Injection moulder not automatic
-        sendCommandWithoutArgument("InjectionMouldingMachine1_off");
-      }
-      availabilitySignal.isCommandSent = 1;
+        && availabilitySignal.isSendingCommandNecessary) {
+      resendAvailabilityCommand();
+      availabilitySignal.isSendingCommandNecessary = false;
       availabilitySignal.lastTimeCommandWasSentMilliseconds = millis();
     }
   }
@@ -162,9 +166,9 @@ void handlePartSignal(inputSignal *signal, char *messageAtPositiveEdge) {
     // signal is unchanged since last loop
     if (isStableLongerThan(signal, DEBOUNCE_DELAY_MILLISECONDS)
         && (*signal).lastState == LOW
-        && !(*signal).isCommandSent) {
+        && (*signal).isSendingCommandNecessary) {
       sendCommandWithoutArgument(messageAtPositiveEdge);
-      (*signal).isCommandSent = 1;
+      (*signal).isSendingCommandNecessary = false;
     }
   }
 }
