@@ -54,10 +54,10 @@ struct inputSignal {
 };
 
 // initiating global variables
-bool isMouldClosed = false;
 inputSignal availabilitySignal;
 inputSignal mouldCloseSignal;
 inputSignal rejectSignal;
+bool isReject = false;
 
 // functions
 int getTimeSinceLastChange(unsigned long lastChangeTimeMilliseconds) {
@@ -139,6 +139,8 @@ void setup() {
   rejectSignal.reading = HIGH;
   pinMode(rejectSignal.pin, INPUT_PULLUP);
 
+  isReject = false;
+
   // initialize serial communication:
   Serial.begin(9600);
 }
@@ -190,34 +192,24 @@ bool negativeEdgeDetected(inputSignal *signal) {
   return edgeDetected(signal, "negativeEdge");
 }
 
-// bool negativeEdgeDetected(inputSignal *signal) {
-//   (*signal).reading = digitalRead((*signal).pin);
-//   // Serial.print("mould close reading");
-//   // Serial.println((*signal).reading);
-//   if (isStateChanged(signal)) {
-//     update(signal);
-//     //Serial.println("state changed");
-//     //Serial.println((*signal).lastState);
-//     //Serial.println(stateAfterEdge);
-//     if ((*signal).lastState == HIGH) {
-//       //Serial.println("negative edge");
-//       return true;
-//     }
-//   }
-//   // Serial.println("no negative edge");
-//   return false;
-// }
+bool positiveEdgeDetected(inputSignal *signal) {
+  return edgeDetected(signal, "positiveEdge");
+}
 
 void handlePartSignals() {
+  if (positiveEdgeDetected(&rejectSignal)) {
+    isReject = true;
+  }
   if (negativeEdgeDetected(&mouldCloseSignal)) {
     // negated because of INPUT_PULLUP
-    bool isReject = !digitalRead(rejectSignal.pin);
+    // bool isReject = !digitalRead(rejectSignal.pin);
     if (isReject) {
       sendCommandWithoutArgument("InjectionMouldingMachine1_reject_parts_completed");
     } else {
       // good parts
       sendCommandWithoutArgument("InjectionMouldingMachine1_good_parts_completed");      
     }
+    isReject = false;
   }
 }
 
