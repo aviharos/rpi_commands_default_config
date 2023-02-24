@@ -37,6 +37,7 @@ https://www.arduino.cc/en/Tutorial/BuiltInExamples/StateChangeDetection
 // constants
 const unsigned long DEBOUNCE_DELAY_MILLISECONDS = 50;
 const unsigned long RESEND_AVAILABILITY_STATUS_PERIOD_MILLISECONDS = 60e3;
+const int BAUD_RATE = 9600;
 
 // pins
 const byte availabilityPin = 2;
@@ -47,10 +48,14 @@ const byte rejectPin = 4;
 struct inputSignal {
   byte pin;
   bool isSendingCommandNecessary = true;
-  bool reading = LOW;
-  bool lastState = LOW;
+  bool reading = HIGH;
+  bool lastReading = HIGH;
+  bool state = HIGH;
   unsigned long lastChangeTimeMilliseconds = millis();
   unsigned long lastTimeCommandWasSentMilliseconds = millis();
+  bool hasPositiveEdge = false;
+  bool hasNegativeEdge = false;
+  bool edgeHasBeenSignalled = true;
 };
 
 // initiating global variables
@@ -60,6 +65,47 @@ inputSignal rejectSignal;
 bool isReject = false;
 
 // functions
+void setupInputSignal(inputSignal *signal, byte pin) {
+  (*signal).pin = pin;
+  pinMode((*signal).pin, INPUT_PULLUP);
+  (*signal).isSendingCommandNecessary = false;
+  (*signal).reading = HIGH;
+  (*signal).lastReading = HIGH;
+  (*signal).state = HIGH;
+  (*signal).lastChangeTimeMilliseconds = millis();
+  (*signal).lastTimeCommandWasSentMilliseconds = millis();
+  (*signal).hasNegativeEdge = false;
+  (*signal).hasPositiveEdge = false;
+  (*signal).edgeHasBeenSignalled = false;
+}
+
+void setup() {
+  setupInputSignal(&availabilitySignal, availabilityPin);
+  setupInputSignal(&mouldCloseSignal, mouldClosePin);
+  setupInputSignal(&rejectSignal, rejectPin);
+
+  isReject = false;
+
+  // initialize serial communication:
+  Serial.begin(BAUD_RATE);
+}
+
+bool isReadingChanged(inputSignal *signal) {
+  if ((*signal).lastReading != (*signal).reading)
+    return true;
+  else
+    return false;
+}
+
+void updateAfterReadingChanged(inputSignal *signal) {
+  (*signal).lastReading = (*signal).reading;
+  (*signal).lastChangeTimeMilliseconds = millis();
+  (*signal).isSendingCommandNecessary = false;
+  (*signal).edgeHasBeenSignalled = false;
+  (*signal).hasPositiveEdge = false;
+  (*signal).hasNegativeEdge = false;
+}
+
 int getTimeSinceLastChange(unsigned long lastChangeTimeMilliseconds) {
   unsigned long currentTime = millis();
   if (lastChangeTimeMilliseconds > currentTime) {
@@ -79,26 +125,6 @@ bool isStableLongerThan(inputSignal *signal, unsigned long timeDelta) {
   return getTimeSinceLastSignalChange(signal) > timeDelta;
 }
 
-bool isStateChanged(inputSignal *signal) {
-  if ((*signal).lastState != (*signal).reading)
-    return true;
-  else
-    return false;
-}
-
-void update(inputSignal *signal) {
-  (*signal).lastState = (*signal).reading;
-  (*signal).lastChangeTimeMilliseconds = millis();
-  (*signal).isSendingCommandNecessary = true;
-}
-
-void sendCommandWithoutArgument(char *command_id) {
-  StaticJsonDocument<64> command;
-  command[command_id] = nullptr;
-  // send commands to Raspberry Pi on Serial
-  serializeJson(command, Serial);
-}
-
 bool isResendCommandDue(inputSignal *signal) {
   if (getTimeSinceLastChange((*signal).lastTimeCommandWasSentMilliseconds) > RESEND_AVAILABILITY_STATUS_PERIOD_MILLISECONDS) {
     return true;
@@ -113,96 +139,67 @@ void indicateSendingCommandNecessaryIfNeeded(inputSignal *signal) {
   }
 }
 
-void resendAvailabilityCommand(){
-  if (availabilitySignal.lastState == LOW) {
-    // Injection moulder automatic
-    sendCommandWithoutArgument("InjectionMouldingMachine1_on");
-  } else {  // HIGH
-    // Injection moulder not automatic
-    sendCommandWithoutArgument("InjectionMouldingMachine1_off");
+void debounceEdges(inputSignal *signal) {
+  if (isStableLongerThan(signal, DEBOUNCE_DELAY_MILLISECONDS)) {
+    (*signal).state = (*signal).reading;
+    if ((*signal).edgeHasBeenSignalled) {
+      (*signal).hasPositiveEdge = false;
+      (*signal).hasNegativeEdge = false;
+    } else { // edge has not been signalled, so set hasPositiveEdge or hasNegativeEdge to true
+      (*signal).edgeHasBeenSignalled = true;
+      (*signal).isSendingCommandNecessary = true;
+      // because of INPUT_PULLUP, signal values are reversed
+      if ((*signal).state == LOW) {
+        (*signal).hasPositiveEdge = true;
+      } else {
+        (*signal).hasNegativeEdge = true;
+      }
+    }
   }
 }
 
-void setup() {
-  availabilitySignal.pin = availabilityPin;
-  availabilitySignal.lastState = HIGH;
-  availabilitySignal.reading = HIGH;
-  pinMode(availabilitySignal.pin, INPUT_PULLUP);
+void handle(inputSignal *signal) {
+  (*signal).reading = digitalRead((*signal).pin);
+  if (isReadingChanged(signal)) {
+    updateAfterReadingChanged(signal);
+  }
+  debounceEdges(signal);
+  indicateSendingCommandNecessaryIfNeeded(signal);
+}
 
-  mouldCloseSignal.pin = mouldClosePin;
-  mouldCloseSignal.lastState = LOW;
-  mouldCloseSignal.reading = LOW;
-  pinMode(mouldCloseSignal.pin, INPUT_PULLUP);
+void sendCommandWithoutArgument(char *command_id) {
+  StaticJsonDocument<64> command;
+  command[command_id] = nullptr;
+  // send commands to Raspberry Pi on Serial
+  serializeJson(command, Serial);
+}
 
-  rejectSignal.pin = rejectPin;
-  rejectSignal.lastState = HIGH;
-  rejectSignal.reading = HIGH;
-  pinMode(rejectSignal.pin, INPUT_PULLUP);
-
-  isReject = false;
-
-  // initialize serial communication:
-  Serial.begin(9600);
+void resendAvailabilityCommand(){
+  // inverted because of INPUT_PULLUP
+  if (availabilitySignal.state == LOW) {
+    sendCommandWithoutArgument("InjectionMouldingMachine1_on");
+  } else {  // HIGH
+    sendCommandWithoutArgument("InjectionMouldingMachine1_off");
+  }
+  availabilitySignal.isSendingCommandNecessary = false;
+  availabilitySignal.lastTimeCommandWasSentMilliseconds = millis();  
 }
 
 void handleAvailability() {
-  availabilitySignal.reading = digitalRead(availabilitySignal.pin);
-  if (isStateChanged(&availabilitySignal)) {
-    update(&availabilitySignal);
-  } else {
-    // availability signal unchanged since last loop
-    indicateSendingCommandNecessaryIfNeeded(&availabilitySignal);
-    if (isStableLongerThan(&availabilitySignal, DEBOUNCE_DELAY_MILLISECONDS)
-        && availabilitySignal.isSendingCommandNecessary) {
-      resendAvailabilityCommand();
-      availabilitySignal.isSendingCommandNecessary = false;
-      availabilitySignal.lastTimeCommandWasSentMilliseconds = millis();
-    }
+  handle(&availabilitySignal);
+  if (availabilitySignal.isSendingCommandNecessary) {
+    resendAvailabilityCommand();
   }
 }
 
-bool edgeDetected(inputSignal *signal, char *type) {
-  bool stateAfterEdge;
-  if (type == "positiveEdge") {
-    // inverted because of INPUT_PULLUP
-    // Serial.println("type is positive");
-    stateAfterEdge = LOW;
-  } else if (type == "negativeEdge") {
-    // Serial.println("type is negative");
-    stateAfterEdge = HIGH;
-  }
-  (*signal).reading = digitalRead((*signal).pin);
-  // Serial.print("mould close reading");
-  // Serial.println((*signal).reading);
-  if (isStateChanged(signal)) {
-    update(signal);
-    //Serial.println("state changed");
-    //Serial.println((*signal).lastState);
-    //Serial.println(stateAfterEdge);
-    if ((*signal).lastState == stateAfterEdge) {
-      //Serial.println("negative edge");
-      return true;
-    }
-  }
-  // Serial.println("no negative edge");
-  return false;
-}
-
-bool negativeEdgeDetected(inputSignal *signal) {
-  return edgeDetected(signal, "negativeEdge");
-}
-
-bool positiveEdgeDetected(inputSignal *signal) {
-  return edgeDetected(signal, "positiveEdge");
-}
-
-void handlePartSignals() {
-  if (positiveEdgeDetected(&rejectSignal)) {
+void handleParts() {
+  handle(&rejectSignal);
+  if (rejectSignal.hasPositiveEdge) {
     isReject = true;
   }
-  if (negativeEdgeDetected(&mouldCloseSignal)) {
-    // negated because of INPUT_PULLUP
-    // bool isReject = !digitalRead(rejectSignal.pin);
+
+  handle(&mouldCloseSignal);
+  if (mouldCloseSignal.hasNegativeEdge) {
     if (isReject) {
       sendCommandWithoutArgument("InjectionMouldingMachine1_reject_parts_completed");
     } else {
@@ -215,5 +212,5 @@ void handlePartSignals() {
 
 void loop() {
   handleAvailability();
-  handlePartSignals();
+  handleParts();
 }
