@@ -76,7 +76,7 @@ void setupInputSignal(inputSignal *signal, byte pin) {
   (*signal).lastTimeCommandWasSentMilliseconds = millis();
   (*signal).hasNegativeEdge = false;
   (*signal).hasPositiveEdge = false;
-  (*signal).edgeHasBeenSignalled = false;
+  (*signal).edgeHasBeenSignalled = true;
 }
 
 void setup() {
